@@ -1,0 +1,53 @@
+---
+title: "About Me"
+author: "Adesina Adeniran"
+---
+
+## Intro
+
+Hi, and welcome to my website! My name is Adesina, but I go by Addy for short. I am a first semester student at Zicklin pursuing an MS in Business Analytics, on the Data Analytics track. 
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+if(!require("leaflet")){
+    options(repos=c(CRAN="https://cloud.r-project.org"))
+    install.packages("leaflet")
+    stopifnot(require("leaflet"))
+}
+
+baruch_longitude <- -73.98333
+baruch_latitude  <- +40.75028
+
+leaflet() |>
+  addTiles() |>
+  setView(baruch_longitude, baruch_latitude, zoom=17) |>
+  addPopups(baruch_longitude, baruch_latitude, 
+            "I am a Master's student at <b>Baruch College</b>!")
+```
+
+Feel free the check out my [LinkedIn profile](https://linkedin.com/in/adesinabu2024/) and my [resume](https://drive.google.com/file/d/1w3N_7v2QRApEcqJsMmgN-ezxTjZhRpfw/view?usp=sharing)!
+
+![Headshot](images/Adesina Adeniran Headshot.jpg)
+
+## About Me
+
+Some personal facts about me include:
+
+* I love football (soccer) and my favorite club is Chelsea F.C. [![Chelsea FC](https://i.guim.co.uk/img/media/c4f3794981af41d46425342f7ef065dfcca7aa2a/0_241_3500_2101/master/3500.jpg?width=1200&quality=85&auto=format&fit=max&s=d66ed625cac270345981da00b5b501e4)](https://en.wikipedia.org/wiki/Chelsea_F.C.)
+* I love music too, and my favorite artists are:
+  * Michael Jackson [![Michael Jackson](https://cdn-p.smehost.net/sites/28d35d54a3c64e2b851790a18a1c4c18/wp-content/uploads/2023/08/1988_Liverpool_Concert1.jpg)](https://en.wikipedia.org/wiki/Michael_Jackson)
+  * and Lil Uzi Vert.[![Lil Uzi Vert](https://pbs.twimg.com/media/GjDC1GzXkAANHLC.jpg:large)](https://en.wikipedia.org/wiki/Lil_Uzi_Vert)
+* My favorite TV Show of all time is [The Sopranos](https://en.wikipedia.org/wiki/The_Sopranos)
+* My favorite hobbies include:
+  * Working out (when I can)
+  * Making instrumentals on FL Studio
+  * Playing videogames (EAFC 25)
+  
+
+  
+
+
+

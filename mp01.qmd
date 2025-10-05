@@ -1,0 +1,786 @@
+---
+title: "MiniProject01"
+author: "Adesina Adeniran"
+---
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+if(!dir.exists(file.path("data", "mp01"))){
+    dir.create(file.path("data", "mp01"), showWarnings=FALSE, recursive=TRUE)
+}
+
+GLOBAL_TOP_10_FILENAME <- file.path("data", "mp01", "global_top10_alltime.csv")
+
+if(!file.exists(GLOBAL_TOP_10_FILENAME)){
+    download.file("https://www.netflix.com/tudum/top10/data/all-weeks-global.tsv", 
+                  destfile=GLOBAL_TOP_10_FILENAME)
+}
+
+COUNTRY_TOP_10_FILENAME <- file.path("data", "mp01", "country_top10_alltime.csv")
+
+if(!file.exists(COUNTRY_TOP_10_FILENAME)){
+    download.file("https://www.netflix.com/tudum/top10/data/all-weeks-countries.tsv", 
+                  destfile=COUNTRY_TOP_10_FILENAME)
+}
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+if(!require("tidyverse")) install.packages("tidyverse")
+library(readr)
+library(dplyr)
+
+GLOBAL_TOP_10 <- read_tsv(GLOBAL_TOP_10_FILENAME)
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+# changing literal "N/A" strings into actual NA values 
+GLOBAL_TOP_10 <- GLOBAL_TOP_10 |>
+  mutate(season_title = if_else(season_title == "N/A", NA, season_title))
+
+# reading the country top 10 file, with NA normalization
+COUNTRY_TOP_10 <- read_tsv(COUNTRY_TOP_10_FILENAME, na = c("N/A"))
+```
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+
+
+library(DT)
+GLOBAL_TOP_10 |> 
+  head(n=20) |>
+  datatable(options=list(searching=FALSE, info=FALSE))
+library(stringr)
+format_titles <- function(df){
+  colnames(df) <- str_replace_all(colnames(df), "_", " ") |> str_to_title()
+  df
+}
+
+GLOBAL_TOP_10 |>
+  mutate(`runtime_(minutes)` = round(60 * runtime)) |>
+  select(-season_title) |>
+  format_titles() |>
+  head(n=20) |>
+  datatable(options=list(searching=FALSE, info=FALSE)) |>
+  formatRound(c('Weekly Hours Viewed', 'Weekly Views'))
+
+```
+
+## Exploratory Data Analysis
+
+
+```{r}
+#| echo: false
+
+num_countries = n_distinct(COUNTRY_TOP_10$country_name)
+```
+
+#### **Netflix's reach around the world**
+Netflix operates in **`{r} num_countries`** countries.
+
+
+```{r}
+#| echo: false
+most_weeks_show = GLOBAL_TOP_10 |> 
+  filter(category == "Films (Non-English)") |>
+  group_by(show_title) |>
+  summarize(most_weeks = max(cumulative_weeks_in_top_10)) |>
+  arrange(desc(most_weeks)) |>
+  slice_max(most_weeks, n=1) |>
+  pull(show_title)
+
+most_weeks = GLOBAL_TOP_10 |> 
+  filter(category == "Films (Non-English)") |>
+  group_by(show_title) |>
+  summarize(most_weeks = max(cumulative_weeks_in_top_10)) |>
+  arrange(desc(most_weeks)) |>
+  slice_max(most_weeks, n=1) |>
+  pull(most_weeks)
+```
+#### **Most popular non-English-language film**
+The non-English-language film that has spent the most cumulative weeks in the Global Top 10 is *`{r} most_weeks_show`*, with **`{r} most_weeks`** cumulative weeks.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+longest_film <- GLOBAL_TOP_10 |>
+  filter(category == "Films (English)" | category == "Films (Non-English)") |>
+  select(show_title, runtime) |>
+  arrange(desc(runtime)) |>
+  mutate(runtime_min = runtime * 60) |>
+  head(1) |>
+  pull(show_title)
+
+longest_film_mins <- GLOBAL_TOP_10 |>
+  filter(category == "Films (English)" | category == "Films (Non-English)") |>
+  select(show_title, runtime) |>
+  arrange(desc(runtime)) |>
+  mutate(runtime_min = round(runtime * 60)) |>
+  head(1) |>
+  pull(runtime_min)
+```
+
+#### **Longest Film**
+The longest film to have ever appeared in the Netflix Global Top 10 is *`{r} longest_film`*. It is **`{r} longest_film_mins`** minutes long!
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+most_total_hours = GLOBAL_TOP_10 |>
+  group_by(category, show_title) |>
+  summarize(total_hours = sum(weekly_hours_viewed)) |>
+  slice_max(total_hours, n=1) |>
+  format_titles() |>
+  datatable(options=list(searching=FALSE, info=FALSE)) |>
+  formatRound(c('Total Hours'))
+
+hours = GLOBAL_TOP_10 |>
+  group_by(category, show_title) |>
+  summarize(total_hours = sum(weekly_hours_viewed)) |>
+  slice_max(total_hours, n=1) |>
+  filter(show_title == "Squid Game") |>
+  pull(total_hours)
+
+hours <- format(hours, big.mark = ",", scientific = FALSE)
+ 
+
+show = GLOBAL_TOP_10 |>
+  group_by(category, show_title) |>
+  summarize(total_hours = sum(weekly_hours_viewed)) |>
+  slice_max(total_hours, n=1) |>
+  filter(show_title == "Squid Game") |>
+  pull(show_title)
+
+
+```
+
+#### **Most Total Viewership**
+In each of the four categories of media, these are the show titles with the most total hours of global viewership!
+
+> `{r} most_total_hours`
+Of these, *`{r} show`* had the most hours of viewership, with **`{r} hours`** total hours!
+
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+
+
+title = COUNTRY_TOP_10 |>
+  filter(category == "TV") |>
+  summarize(most_weeks = max(cumulative_weeks_in_top_10, na.rm=TRUE), 
+            .by = c(country_name, show_title)) |>
+  slice_max(most_weeks, n = 1, by = country_name) |>
+  arrange(desc(most_weeks)) |>
+  head(1) |>
+  pull(show_title)
+
+weeks = COUNTRY_TOP_10 |>
+  filter(category == "TV") |>
+  summarize(most_weeks = max(cumulative_weeks_in_top_10, na.rm=TRUE), 
+            .by = c(country_name, show_title)) |>
+  slice_max(most_weeks, n = 1, by = country_name) |>
+  arrange(desc(most_weeks)) |>
+  head(1) |>
+  pull(most_weeks)
+
+country = COUNTRY_TOP_10 |>
+  filter(category == "TV") |>
+  summarize(most_weeks = max(cumulative_weeks_in_top_10, na.rm=TRUE), 
+            .by = c(country_name, show_title)) |>
+  slice_max(most_weeks, n = 1, by = country_name) |>
+  arrange(desc(most_weeks)) |>
+  head(1) |>
+  pull(country_name)
+```
+
+#### **Longest Run in the Top 10 for a TV Show**
+
+*`{r} title`* had the longest run in a country's Top 10. It spent **`{r} weeks`** weeks in **`{r} country`'s** Top 10 chart.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+
+russia = COUNTRY_TOP_10 |>
+  summarise(n_weeks = n_distinct(week),
+            last_week = max(week, na.rm=TRUE),
+            .by = country_name) |>
+  slice_min(n_weeks, n=1) |>
+  pull(country_name)
+
+numweeks = COUNTRY_TOP_10 |>
+  summarise(n_weeks = n_distinct(week),
+            last_week = max(week, na.rm=TRUE),
+            .by = country_name) |>
+  slice_min(n_weeks, n=1) |>
+  pull(n_weeks)
+
+lastweek = COUNTRY_TOP_10 |>
+  summarise(n_weeks = n_distinct(week),
+            last_week = max(week, na.rm=TRUE),
+            .by = country_name) |>
+  slice_min(n_weeks, n=1) |>
+  pull(last_week)
+```
+
+#### **Low Service History**
+
+Netflix provides over 200 weeks of service history for all countries in our dataset but one. That country is **`{r} russia`**, with only **`{r} numweeks`** weeks of service history. Netflix ceased operations in there on **`{r} lastweek`**.
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+
+squidgame <- GLOBAL_TOP_10 |>
+  filter(show_title == "Squid Game") |>
+  summarise(total_views = sum(weekly_views, na.rm=TRUE), .by = season_title) |>
+  format_titles() |>
+  datatable(options=list(searching=FALSE, info=FALSE)) |>
+  formatRound(c('Total Views'))
+
+total_views = GLOBAL_TOP_10 |>
+  filter(show_title == "Squid Game") |>
+  summarise(total_views = sum(weekly_views, na.rm=TRUE), .by = season_title) |>
+  summarise(total = sum(total_views)) |>
+  pull(total)
+
+total_views <- format(total_views, big.mark = ",", scientific = FALSE)
+```
+
+#### **_*Squid Game*_**
+
+*Squid Game* took the world by storm from its very first season. It's total viewership across its 3 seasons is absolutely amazing!
+
+> *`{r} squidgame`*
+That makes its total viewship come up to a whopping **`{r} total_views`** views across its 3 seasons!
+
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+
+red_notice_views_21 <- GLOBAL_TOP_10 |>
+  filter(show_title == "Red Notice", year(week) == "2021") |>
+  mutate(weekly_mins_viewed = weekly_hours_viewed * 60) |>
+  mutate(weekly_views_1 = weekly_mins_viewed / 118) |>
+  summarize(total_views = sum(weekly_views_1)) |>
+  pull(total_views)
+
+red_notice_views_21 <- format(red_notice_views_21, big.mark = ",", scientific = FALSE)
+```
+
+#### **_*Red Notice*_**
+
+*Red Notice* is another popular film on Netflix. In 2021, it received approximately **`{r} red_notice_views_21`** views!
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+
+num_one_shows <- COUNTRY_TOP_10 |>
+  filter(country_iso2 == "US", category == "Films", weekly_rank == 1) |>
+  distinct(show_title) |>
+  pull(show_title)
+
+
+num_debut_shows <- COUNTRY_TOP_10|>
+  filter(country_iso2 == "US", category == "Films", show_title %in% num_one_shows, weekly_rank != 1) |>
+  summarize(first_week = min(week, na.rm=TRUE), .by = show_title) |>
+  nrow()
+```
+
+#### **The Slow Burn to #1**
+
+**`{r} num_debut_shows`** shows reached number 1 on the US Top 10 charts, but did not originally debut there.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+
+season <- COUNTRY_TOP_10 |>
+  filter(category == "TV") |>
+  group_by(show_title, season_title) |>
+  filter(week == min(week)) |>
+  summarise(num_countries = n_distinct(country_name)) |>
+  arrange(desc(num_countries)) |>
+  head(1) |>
+  pull(season_title)
+
+num_country <- COUNTRY_TOP_10 |>
+  filter(category == "TV") |>
+  group_by(show_title, season_title) |>
+  filter(week == min(week)) |>
+  summarise(num_countries = n_distinct(country_name)) |>
+  arrange(desc(num_countries)) |>
+  head(1) |>
+  pull(num_countries)
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+
+# Press Release 1
+
+# hours viewed per season
+strangerthings_hours_viewed <- GLOBAL_TOP_10 |>
+  filter(show_title == "Stranger Things") |>
+  mutate(season_title = if_else(is.na(season_title), "Stranger Things 1", season_title)) |>
+  summarise(total_hours_viewed = sum(weekly_hours_viewed, na.rm=TRUE), .by = season_title) |>
+  format_titles() |>
+  datatable(options=list(searching=FALSE, info=FALSE)) |>
+  formatRound(c('Total Hours Viewed'))
+
+# total hours viewed in all
+total_hours_st_all <- GLOBAL_TOP_10 |>
+  filter(show_title == "Stranger Things") |>
+  mutate(season_title = if_else(is.na(season_title), "Stranger Things 1", season_title)) |>
+  summarise(total_hours_viewed = sum(weekly_hours_viewed, na.rm=TRUE), .by = season_title) |>
+  summarise(total_hours_viewed_all_seasons = sum(total_hours_viewed)) |>
+  mutate(total_hours_viewed_all_seasons = format(total_hours_viewed_all_seasons, big.mark = ","))
+  
+
+# most weeks in top 10
+GLOBAL_TOP_10 |>
+  filter(show_title == "Stranger Things") |>
+  group_by(show_title, season_title) |>
+  summarise(most_weeks_top = max(cumulative_weeks_in_top_10)) |>
+  arrange(desc(most_weeks_top)) |>
+  head(1) |>
+  pull(season_title)
+
+# most weeks in top 10 each season
+most_weeks_top_10_per_season_st <- GLOBAL_TOP_10 |>
+  filter(show_title == "Stranger Things") |>
+  mutate(season_title = if_else(is.na(season_title), "Stranger Things 1", season_title)) |>
+  group_by(season_title) |>
+  summarise(most_weeks_in_top_10 = max(cumulative_weeks_in_top_10)) |>
+  arrange(desc(most_weeks_in_top_10)) |>
+  format_titles() |>
+  datatable(options=list(searching=FALSE, info=FALSE))
+
+
+
+# Stranger Things Ranking vs other english shows most weeks top 10
+st_rank_vs_other_english <- GLOBAL_TOP_10 |>
+  filter(category == "TV (English)") |>
+  group_by(show_title) |>
+  summarise(most_weeks_charted = max(cumulative_weeks_in_top_10)) |>
+  arrange(desc(most_weeks_charted)) |>
+  format_titles() |>
+  datatable(options=list(searching=FALSE, info=FALSE))
+
+# how many countries did stranger things reach top 10
+
+glimpse(COUNTRY_TOP_10)
+
+st_number_of_countries <- COUNTRY_TOP_10 |>
+  filter(show_title == "Stranger Things") |>
+  summarise(num_countries = n_distinct(country_name))
+
+# how many countries did stranger things reach top 10 each season
+st_num_countries_top_10 <- COUNTRY_TOP_10 |>
+  filter(show_title == "Stranger Things") |>
+  mutate(season_title = if_else(is.na(season_title), "Stranger Things 1", season_title)) |>
+  group_by(season_title) |>
+  summarise(num_countries = n_distinct(country_name)) |>
+  arrange(desc(num_countries)) |>
+  format_titles() |>
+  datatable(options=list(searching=FALSE, info=FALSE))
+
+
+# Stranger things rnakng s other tv most weeks top 10 america
+st_rank_vs_other_tv_us <- COUNTRY_TOP_10 |>
+  filter(category == "TV") |>
+  filter(country_iso2 == "US") |>
+  group_by(show_title) |>
+  summarise(most_weeks_top = max(cumulative_weeks_in_top_10)) |>
+  arrange(desc(most_weeks_top)) |>
+  format_titles() |>
+  datatable(options=list(searching=FALSE, info=FALSE))
+
+# how many weeks did stranger things spend number 1
+glimpse(GLOBAL_TOP_10)
+
+GLOBAL_TOP_10 |>
+  filter(show_title == "Stranger Things") |>
+  filter(weekly_rank == 1) |>
+  summarise(num_weeks = n_distinct(week)) |>
+  pull(num_weeks)
+
+
+
+# highest rank each season got  
+st_highest_rank_each_season <- GLOBAL_TOP_10 |>
+  filter(show_title == "Stranger Things") |>
+  mutate(season_title = if_else(is.na(season_title), "Stranger Things 1", season_title)) |>
+  group_by(season_title) |>
+  mutate(highest_rank = min(weekly_rank, na.rm = TRUE)) |>
+  summarise(
+    highest_rank     = first(highest_rank),
+    weeks_at_highest = sum(weekly_rank == highest_rank, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(highest_rank) |>
+  format_titles() |>
+  datatable(options = list(searching = FALSE, info = FALSE))
+```
+
+#### **Global Prominence on Debut**
+
+**`{r} season`** hit the top 10 in the most countries in its debut week. That season of the show debuted in the top 10 in **`{r} num_country`** countries!
+
+## Upcoming Season of *Stranger Things*
+
+The upcoming release of the fifth and final season of *Stranger Things* is upon us, with sources noting a fall 2025 arrival. Based on the show's recent success in previous seasons, fans are expecting nothing short of a classic, and critics are awaiting the show's best ratings yet. The show's viewership per season has been phenomenal, with the last season boasting the show's most total hours viewed ever.
+
+> `{r} strangerthings_hours_viewed` 
+
+Across all seasons, *Stranger Things* has garnered **`{r} total_hours_st_all`** hours of viewership! 
+
+The show has had a strong presence in the Global Top 10 charts across all of its seasons as well, with its last season being the most successful once again.
+
+> `{r} most_weeks_top_10_per_season_st`
+
+Compared to other English TV shows, *Stranger Things* has the 5th best ranking in terms of cumulative weeks in the Global Top 10 charts. 
+
+> `{r} st_rank_vs_other_english`
+
+With this, there is no surprise that the show charted in the Top 10 in **`{r} st_number_of_countries`** countries! Season 1 and 4 reached the Top 10 in more countries than the other two seasons, which many critics are citing as a pre-cursor for the massive success that awaits Season 5.
+
+> `{r} st_num_countries_top_10`
+
+In the U.S. specifically, *Stranger Things* ranks number 3 for most weeks charted among other TV shows, exemplifying its dominance in the TV-show space. 
+
+> `{r} st_rank_vs_other_tv_us`
+
+*Stranger Things* didn't only chart in the Top 10; it also reached the very pinnacle, Number 1, during Season 4! And to assert it's dominance even more, Season 4 spent 7 weeks as the top rated TV show in the world.
+
+> `{r} st_highest_rank_each_season`
+
+``` {r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+library(scales)
+# US charting titles 
+us_films <- COUNTRY_TOP_10 |>
+  filter(country_iso2 == "US", category == "Films") |>
+  distinct(show_title)
+
+us_tv <- COUNTRY_TOP_10 |>
+  filter(country_iso2 == "US", category == "TV") |>
+  distinct(show_title)
+
+# Global Non-English title/season maps (Films & TV)  
+global_noneng_films <- GLOBAL_TOP_10 |>
+  filter(category == "Films (Non-English)") |>
+  distinct(show_title, season_title)
+
+global_noneng_tv <- GLOBAL_TOP_10 |>
+  filter(category == "TV (Non-English)") |>
+  distinct(show_title, season_title)
+
+
+# avg weekly viewres in India for Non-English films 
+
+india_noneng_films <- COUNTRY_TOP_10 |>
+  filter(country_name == "India", category == "Films") |>
+  inner_join(global_noneng_films, by = c("show_title", "season_title")) |>
+  anti_join(us_films, by = "show_title") |>
+  left_join(
+    GLOBAL_TOP_10 |>
+      filter(category == "Films (Non-English)") |>
+      select(show_title, season_title, week, weekly_views, weekly_hours_viewed, runtime),
+    by = c("show_title", "season_title", "week")) |>
+  mutate(weekly_views_india = ifelse(!is.na(weekly_views), weekly_views, weekly_hours_viewed / runtime))
+
+avg_views_india_noneng_films <- india_noneng_films |>
+  summarise(avg_weekly_viewers = mean(weekly_views_india, na.rm = TRUE)) |>
+  mutate(avg_weekly_viewers = comma(round(avg_weekly_viewers))) 
+
+
+
+# avg weekly viewers in India for Non-English TV
+
+india_noneng_tv <- COUNTRY_TOP_10 |>
+  filter(country_name == "India", category == "TV") |>
+  anti_join(us_tv, by = "show_title") |>
+  inner_join(global_noneng_tv, by = c("show_title", "season_title")) |>
+  left_join(GLOBAL_TOP_10, by = c("season_title", "show_title", "week")) |>
+  select(show_title, season_title, week, weekly_views, weekly_hours_viewed, runtime) |>
+  mutate(weekly_views_india = ifelse(!is.na(weekly_views), weekly_views, weekly_hours_viewed / runtime))
+
+avg_views_india_noneng_tv <- india_noneng_tv |>
+  summarise(avg_weekly_viewers = mean(weekly_views_india, na.rm = TRUE)) |>
+  mutate(avg_weekly_viewers = comma(round(avg_weekly_viewers)))
+
+
+
+# most popular in India by average weekly viewers
+top_noneng_films_by_avg <- india_noneng_films |>
+  group_by(show_title, season_title) |>
+  summarise(avg_weekly_viewers = mean(weekly_views_india, na.rm = TRUE), .groups = "drop") |>
+  arrange(desc(avg_weekly_viewers)) |>
+  mutate(avg_weekly_viewers = comma(round(avg_weekly_viewers))) |>
+  select(show_title, avg_weekly_viewers) |>
+  format_titles() |>
+  datatable(options = list(searching = FALSE, info = FALSE))
+
+top_noneng_tv_by_avg <- india_noneng_tv |>
+  group_by(show_title, season_title) |>
+  summarise(avg_weekly_viewers = mean(weekly_views_india, na.rm = TRUE), .groups = "drop") |>
+  arrange(desc(avg_weekly_viewers)) |>
+  mutate(avg_weekly_viewers = comma(round(avg_weekly_viewers))) |>
+  format_titles() |>
+  datatable(options = list(searching = FALSE, info = FALSE))
+
+# Audience growth over time
+
+yearly_avg_viewers_india_noneng_films <- india_noneng_films |>
+  mutate(year = lubridate::year(week)) |>
+  summarise(avg_weekly_viewers = mean(weekly_views_india, na.rm = TRUE), .by = year) |>
+  arrange(year) |>
+  tail(3) |>
+  mutate(avg_weekly_viewers = comma(round(avg_weekly_viewers))) |>
+  format_titles() |>
+  datatable(options = list(searching = FALSE, info = FALSE))
+
+yearly_avg_viewers_india_noneng_films_numeric <- india_noneng_films |>
+  mutate(year = lubridate::year(week)) |>
+  summarise(avg_weekly_viewers = mean(weekly_views_india, na.rm = TRUE), .by = year) |>
+  arrange(year)
+
+y2023_film <- yearly_avg_viewers_india_noneng_films_numeric[3,2] |>
+  pull(avg_weekly_viewers)
+
+y2025_film <- yearly_avg_viewers_india_noneng_films_numeric[5,2] |>
+  pull(avg_weekly_viewers)
+
+pct_inc_film <- round(((y2025_film - y2023_film) / y2023_film * 100), digits = 0)
+
+yearly_avg_viewers_india_noneng_TV <- india_noneng_tv |>
+  mutate(year = lubridate::year(week)) |>
+  summarise(avg_weekly_viewers = mean(weekly_views_india, na.rm = TRUE), .by = year) |>
+  arrange(year) |>
+  tail(3) |>
+  mutate(avg_weekly_viewers = comma(round(avg_weekly_viewers))) |>
+  format_titles() |>
+  datatable(options = list(searching = FALSE, info = FALSE))
+
+yearly_avg_viewers_india_noneng_TV_numeric <- india_noneng_tv |>
+  mutate(year = lubridate::year(week)) |>
+  summarise(avg_weekly_viewers = mean(weekly_views_india, na.rm = TRUE), .by = year) |>
+  arrange(year)
+
+y2023_tv <- yearly_avg_viewers_india_noneng_TV_numeric[3,2] |>
+  pull(avg_weekly_viewers)
+
+y2025_tv <- yearly_avg_viewers_india_noneng_TV_numeric[5,2] |>
+  pull(avg_weekly_viewers)
+
+pct_inc_tv <- round(((y2025_tv - y2023_tv) / y2023_tv * 100), digits = 0)
+```
+## New Opportunities in India
+
+Netflix's global reach knows no bounds, so it comes as no surprise that its presence in the most populated country in the world is strong. 
+
+When looking at Netflix's viewership in India among non-English titles that did not chart in the United States, the numbers indicate growth and success. The analysis that follows only takes these films and TV shows into account.
+
+Netflix boasts an average of **`{r} avg_views_india_noneng_tv`** weekly views among non-English (and non-US charting) TV shows in India, the most popular of such shows being:
+
+> `{r} top_noneng_tv_by_avg`
+
+Netflix also boasts and average **`{r} avg_views_india_noneng_films`** weekly views among non-English (and non-US charting) films, the most popular of such films being: 
+
+> `{r} top_noneng_films_by_avg`
+
+Netflix's audience in India has grown over time as well. Among non-English films (non-US charting), average weekly viewership has grown **`{r} pct_inc_film` percent** from 2023 to 2025.
+
+> `{r} yearly_avg_viewers_india_noneng_films`
+
+Among non-English TV shows (non-US charting), average weekly viewership has grown **`{r} pct_inc_tv` percent**.
+
+> `{r} yearly_avg_viewers_india_noneng_TV`
+
+This growth proves that Netflix has capitalized on the opportunity that a country as robust as India has presented, and critics are sure that Netflix will continue to tap into this market.
+
+
+``` {r}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+
+# Press Release 3: Sucess of Ozark
+library(scales)
+
+GLOBAL_TOP_10 |>
+  filter(show_title == "Ozark") |>
+  distinct(season_title)
+
+glimpse(GLOBAL_TOP_10)
+glimpse(COUNTRY_TOP_10)
+
+ozark_global <- GLOBAL_TOP_10 |>
+  filter(show_title == "Ozark")
+
+ozark_country <- COUNTRY_TOP_10 |>
+  filter(show_title == "Ozark")
+
+# num countries charted
+
+ozark_countries_charted <- ozark_country |>
+  summarise(num_countries = n_distinct(country_name)) |>
+  pull(num_countries)
+
+# num countries number 1
+
+ozark_num1_countries <- ozark_country |>
+  filter(weekly_rank == 1) |>
+  summarise(num_countries_num1 = n_distinct(country_name)) |>
+  pull(num_countries_num1)
+
+# num weeks each season charted in the US
+
+ozark_weeks_us <- COUNTRY_TOP_10 |>
+  filter(country_iso2 == "US", show_title == "Ozark") |>
+  summarise(total_weeks_charted_in_America = n_distinct(week), .by = season_title) |>
+  arrange(season_title) |>
+  format_titles() |>
+  datatable(options = list(searching = FALSE, info = FALSE))
+
+# num weeks num 1 eachs eason US
+
+ozark_num1_weeks_us <- COUNTRY_TOP_10 |>
+  filter(country_iso2 == "US", show_title == "Ozark", weekly_rank == 1) |>
+  summarise(total_weeks_at_number_1 = n_distinct(week), .by = season_title) |>
+  arrange(season_title) |>
+  format_titles() |>
+  datatable(options = list(searching = FALSE, info = FALSE))
+
+# global grwoth across 4 seasons, avg views per season
+ozark_global_growth <- ozark_global |>
+  summarise(avg_hours_viewed = mean(weekly_hours_viewed, na.rm = TRUE), .by = season_title) |>
+  arrange(season_title) |>
+  mutate(avg_hours_viewed = comma(round(avg_hours_viewed))) |>
+  format_titles() |>
+  datatable(options = list(searching = FALSE, info = FALSE))
+
+ozark_growth_num <- ozark_global |>
+  summarise(avg_hours_viewed = mean(weekly_hours_viewed, na.rm = TRUE), .by = season_title) |>
+  arrange(season_title)
+
+s1 <- ozark_growth_num[1,2] |> pull(avg_hours_viewed)
+s2 <- ozark_growth_num[4,2] |> pull(avg_hours_viewed)
+
+pct_inc_o <- round(((s2 - s1) / s1 * 100), digits = 0)
+
+ozark_total_global_views <- ozark_global |>
+  summarise(total_hours_viewed = sum(weekly_hours_viewed, na.rm = TRUE)) |>
+  mutate(total_hours_viewed = comma(round(total_hours_viewed))) |>
+  pull(total_hours_viewed)
+
+# ozarksmost weeks charted vs other english shows
+
+# Stranger Things Ranking vs other english shows most weeks top 10
+o_most_weeks_charted <- GLOBAL_TOP_10 |>
+  filter(category == "TV (English)") |>
+  group_by(show_title) |>
+  summarise(most_weeks_charted = max(cumulative_weeks_in_top_10)) |>
+  arrange(desc(most_weeks_charted)) |>
+  format_titles() |>
+  datatable(options=list(searching=FALSE, info=FALSE))
+```
+## *Ozark*'s Success: A New Season on the Cards?
+
+*Ozark* is another one of Netflix's hit TV-shows, and with 4 seasons done and dusted, fans are hoping for a 5th. This comes as no surprise due to how successful the last 4 seasons were, with the 4th eclipsing the rest. 
+
+The show sits comfortably at number 8 for the most weeks charted globally of English TV-shows.  
+
+> `{r} o_most_weeks_charted`
+
+It charted in **`{r} ozark_countries_charted`** countries, and charted #1 in **`{r} ozark_num1_countries`** countries. 
+
+The fourth season was immensely popular in the United States, as it spent 14 weeks in top 10 charts, way more than previous seasons.
+
+> `{r} ozark_weeks_us`
+
+The fourth season was the only season to chart at #1 in the US, spending 5 weeks there.
+
+> `{r} ozark_num1_weeks_us` 
+
+The hype for a 5th season is totally understandable, as the 4th season also amassed more average weekly hours viewed than any of the other seasons, a **`{r} pct_inc_o` percent** increase from season 1! In total, the show has garnered **`{r} ozark_total_global_views`** views!
+
+> `{r} ozark_global_growth`
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

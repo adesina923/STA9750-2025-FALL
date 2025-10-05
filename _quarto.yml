@@ -11,8 +11,6 @@ website:
     search: false
     left:
       - href: index.qmd
-        text: Home
-      - href: mp0.qmd
         text: Mini Project 0
       - href: mp01.qmd
         text: Mini Project 1

@@ -754,7 +754,7 @@ Concentrating on District 50—Staten Island’s highest dead-tree fraction—de
 
 > `{r} district_dead_top_boro_df`
 
-> `{r} vizmemo`
+> `{r} vizmemo` 
 
 
 

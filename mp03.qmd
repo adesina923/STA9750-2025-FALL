@@ -1,0 +1,761 @@
+---
+title: "Mini-Project #03: Visualizing and Maintaining the Green Canopy of NYC"
+author: "adesina923"
+editor:
+  mode: source
+format:
+  html:
+    code-fold: true
+---
+
+```{r}
+#| label: task-1-download-boundaries
+#| code-fold: true
+#| code-summary: "Task 1 — Download & read NYC Council Districts (runs silently)"
+#| echo: true
+#| eval: true
+#| message: false
+#| warning: false
+#| results: "hide"
+
+############ TASK 1 #################
+# Requires: install.packages("sf")
+library(sf)
+library(fs)
+
+download_cc_boundaries <- function(
+  url = "https://s-media.nyc.gov/agencies/dcp/assets/files/zip/data-tools/bytes/city-council/nycc_25c.zip",
+  data_dir = file.path("data", "mp03")
+) {
+  # 1) Make data/mp03 if needed
+  if (!dir.exists(data_dir)) {
+    dir.create(data_dir, showWarnings = FALSE, recursive = TRUE)
+  }
+
+  zip_path <- file.path(data_dir, basename(url))  # .../data/mp03/nycc_25c.zip
+
+  # 2) Download ZIP only if needed (binary mode)
+  if (!file.exists(zip_path)) {
+    download.file(url, destfile = zip_path, mode = "wb", quiet = TRUE)
+  }
+
+  # 3) Unzip only if needed (look for nycc.shp first)
+  shp_path <- list.files(
+    data_dir,
+    pattern = "^nycc\\.shp$",
+    recursive = TRUE,
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+
+  if (length(shp_path) == 0) {
+    unzip(zip_path, exdir = data_dir)
+    shp_path <- list.files(
+      data_dir,
+      pattern = "^nycc\\.shp$",
+      recursive = TRUE,
+      full.names = TRUE,
+      ignore.case = TRUE
+    )
+    if (length(shp_path) == 0) stop("Could not find 'nycc.shp' after unzipping.")
+  }
+
+  # 4) Read shapefile and transform to WGS84
+  cc <- sf::st_read(shp_path[1], quiet = TRUE)
+  sf::st_transform(cc, crs = "WGS84")
+}
+
+# Run it (silently) so nyc_cc_boundaries exists for later chunks
+nyc_cc_boundaries <- download_cc_boundaries()
+```
+
+### Task 2 — NYC Tree Points (API download, runs silently)
+
+```{r}
+#| label: task-2-download-treepoints
+#| code-fold: true
+#| code-summary: "Task 2 — Download NYC Tree Points via API (runs silently)"
+#| echo: true
+#| eval: true
+#| message: false
+#| warning: false
+#| results: "hide"
+
+############# TASK 2 ####################
+
+library(httr2)
+library(sf)
+library(dplyr)
+
+download_tree_points <- function() {
+  # Ensure output dir exists
+  DATA_DIR <- file.path("data", "mp03")
+  if (!dir.exists(DATA_DIR)) {
+    dir.create(DATA_DIR, showWarnings = FALSE, recursive = TRUE)
+  }
+  
+  # API and paging parameters
+  ENDPOINT      <- "https://data.cityofnewyork.us/resource/hn5i-inap.geojson"
+  BATCH_SIZE    <- 50000
+  OFFSET        <- 0
+  END_OF_EXPORT <- FALSE
+  
+  # Consistent filenames for each page
+  page_file <- function(offset) {
+    file.path(
+      DATA_DIR,
+      sprintf("treepoints_limit%05d_offset%08d.geojson", BATCH_SIZE, offset)
+    )
+  }
+  
+  # Loop until a "short" page signals the end
+  while (!END_OF_EXPORT) {
+    DEST <- page_file(OFFSET)
+    
+    if (!file.exists(DEST)) {
+      cat("Requesting items", OFFSET, "to", BATCH_SIZE + OFFSET, "\n")
+      
+      REQ <- request(ENDPOINT) |>
+        req_user_agent("STA9750-MP03 (R/httr2)") |>
+        req_url_query(`$limit` = BATCH_SIZE, `$offset` = OFFSET) |>
+        req_retry(max_tries = 3) |>
+        req_timeout(120)
+      
+      RESP <- req_perform(REQ)
+      
+      # Save raw GeoJSON exactly as returned
+      writeBin(resp_body_raw(RESP), DEST)
+      Sys.sleep(0.25)
+    } else {
+      cat("Exists, skipping:", basename(DEST), "\n")
+    }
+    
+    # Check page size to decide whether to continue
+    PAGE_SF <- tryCatch(st_read(DEST, quiet = TRUE), error = function(e) NULL)
+    if (is.null(PAGE_SF)) stop("Failed to read GeoJSON page: ", DEST)
+    
+    N_ROWS <- nrow(PAGE_SF)
+    if (N_ROWS != BATCH_SIZE) {
+      END_OF_EXPORT <- TRUE
+      cat("End of Data Export Reached\n")
+    } else {
+      OFFSET <- OFFSET + BATCH_SIZE
+    }
+  }
+  
+  # Read ALL saved pages and combine
+  ALL_FILES <- list.files(
+    DATA_DIR,
+    pattern = sprintf("^treepoints_limit%05d_offset\\d+\\.geojson$", BATCH_SIZE),
+    full.names = TRUE
+  ) |> sort()
+  
+  PAGES_SF <- lapply(ALL_FILES, function(f) st_read(f, quiet = TRUE))
+  ALL_DATA <- bind_rows(PAGES_SF)  # combine pages
+  
+  # Ensure result is sf (bind_rows can drop the sf class)
+  if (!inherits(ALL_DATA, "sf")) {
+    ALL_DATA <- st_as_sf(ALL_DATA, sf_column_name = "geometry", crs = st_crs(PAGES_SF[[1]]))
+  }
+  
+  # Normalize CRS to WGS84 for downstream joins
+  ALL_DATA <- st_transform(ALL_DATA, crs = "WGS84")
+  
+  cat("Data export complete:", nrow(ALL_DATA), "rows and", ncol(ALL_DATA), "columns.\n")
+  ALL_DATA
+}
+
+# Run it (silently) so nyc_tree_points exists for later chunks
+nyc_tree_points <- download_tree_points()
+```
+
+### Task 3 — Citywide Map (code fold + rendered plot)
+
+```{r}
+#| label: task-3-build-map
+#| code-fold: true
+#| code-summary: "Task 3 — Build citywide map (runs; creates task3plot)"
+#| echo: true
+#| eval: true
+#| message: false
+#| warning: false
+
+############ TASK 3 #################
+
+# deps
+
+library(dplyr)
+library(sf)
+library(ggplot2)
+
+# sanity checks
+if (!exists("nyc_cc_boundaries")) stop("nyc_cc_boundaries not found. Run Task 1 first.")
+if (!exists("nyc_tree_points"))  stop("nyc_tree_points not found. Run Task 2 first.")
+
+# simplify district boundaries (faster plotting)
+nyc_cc_boundaries_simp <- nyc_cc_boundaries |>
+  mutate(geometry = st_simplify(geometry, dTolerance = 5))
+
+districts <- nyc_cc_boundaries_simp
+trees     <- nyc_tree_points
+
+task3plot <- ggplot(districts) +
+  # council districts (subtle fill + soft outline)
+  geom_sf(fill = "#f4f6f8", color = "#8a8f98", linewidth = 0.25) +
+  # tree points (small, translucent dots)
+  geom_sf(data = trees, inherit.aes = FALSE,
+          color = "#1f7a52", alpha = 0.15, size = 0.08, shape = 16) +
+  # tight map frame, no graticules
+  coord_sf(datum = NA, expand = FALSE, clip = "on") +
+  ggtitle("Trees as Points Over NYC Council Districts") +
+  labs(caption = "NYC OpenData") +
+  theme_void(base_size = 12) +
+  theme(
+    plot.title   = element_text(face = "bold", hjust = 0, margin = margin(b = 6)),
+    plot.caption = element_text(size = 9, hjust = 0, margin = margin(t = 6)),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+```
+
+## Task 3
+```{r}
+#| echo: false
+task3plot
+```
+
+
+```{r}
+#| label: task-4.1
+#| code-fold: true
+#| code-summary: "Task-4.1"
+#| echo: true
+#| eval: true
+#| message: false
+#| warning: false
+#| results: "hide"
+
+######### TASK 4 ############
+######### 
+library(DT)
+library(stringr)
+library(scales)
+format_titles <- function(df){
+  colnames(df) <- str_replace_all(colnames(df), "_", " ") |> str_to_title()
+  df
+}
+
+trees_with_dist <- st_join(trees, districts, join = st_intersects) 
+
+
+
+numtree <- trees_with_dist |>
+  st_drop_geometry() |>
+  group_by(CounDist) |>
+  summarise(n_trees = n()) |>
+  ungroup() |>
+  arrange(desc(n_trees)) |>
+  mutate(Borough = case_when(
+    CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+    CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+    CounDist >= 19 & CounDist <= 32 ~ "Queens",
+    CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+    CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+    TRUE ~ "Other"
+  )) |>
+  select(Borough, `Council District` = CounDist, `Number of Trees` = n_trees) |>
+  slice_max(`Number of Trees`, n = 1) |>
+  pull(`Number of Trees`) 
+
+numtree <- scales::comma(numtree) 
+
+borough <- trees_with_dist |>
+  st_drop_geometry() |>
+  group_by(CounDist) |>
+  summarise(n_trees = n()) |>
+  ungroup() |>
+  arrange(desc(n_trees)) |>
+  mutate(Borough = case_when(
+    CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+    CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+    CounDist >= 19 & CounDist <= 32 ~ "Queens",
+    CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+    CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+    TRUE ~ "Other"
+  )) |>
+  select(Borough, `Council District` = CounDist, `Number of Trees` = n_trees) |>
+  slice_max(`Number of Trees`, n = 1) |>
+  pull(Borough)
+
+
+council <- trees_with_dist |>
+  st_drop_geometry() |>
+  group_by(CounDist) |>
+  summarise(n_trees = n()) |>
+  ungroup() |>
+  arrange(desc(n_trees)) |>
+  mutate(Borough = case_when(
+    CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+    CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+    CounDist >= 19 & CounDist <= 32 ~ "Queens",
+    CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+    CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+    TRUE ~ "Other"
+  )) |>
+  select(Borough, `Council District` = CounDist, `Number of Trees` = n_trees) |>
+  slice_max(`Number of Trees`, n = 1) |>
+  pull(`Council District`)
+
+
+num1df <- trees_with_dist |>
+  st_drop_geometry() |>
+  group_by(CounDist) |>
+  summarise(n_trees = n()) |>
+  ungroup() |>
+  arrange(desc(n_trees)) |>
+  mutate(Borough = case_when(
+    CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+    CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+    CounDist >= 19 & CounDist <= 32 ~ "Queens",
+    CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+    CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+    TRUE ~ "Other"
+  )) |>
+  mutate(n_trees = scales::comma(n_trees)) |>
+  select(Borough, `Council District` = CounDist, `Number of Trees` = n_trees) |>
+  datatable(caption = "Most Trees per District", options=list(searching=FALSE, info=FALSE))
+```
+
+> `{r} num1df`
+
+```{r}
+#| label: task-4.2
+#| code-fold: true
+#| code-summary: "Task-4.2"
+#| echo: true
+#| eval: true
+#| message: false
+#| warning: false
+#| results: "hide"
+
+library(dplyr)
+library(sf)
+
+# 1) Summarize trees per district + one area per district
+density_df <- trees_with_dist |>
+  st_drop_geometry() |>
+  filter(!is.na(CounDist), !is.na(Shape_Area)) |>
+  group_by(CounDist) |>
+  summarise(
+    TREES      = n(),
+    AREA_SQFT  = max(Shape_Area, na.rm = TRUE),  # one area per district
+    .groups = "drop"
+  ) |>
+  mutate(
+    AREA_KM2       = AREA_SQFT / 10763910.41671,  # ft^2 -> km^2 (if Shape_Area is in ft^2)
+    TREES_PER_KM2  = TREES / AREA_KM2
+  ) |>
+  arrange(desc(TREES_PER_KM2)) |>
+  mutate(Borough = case_when(
+    CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+    CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+    CounDist >= 19 & CounDist <= 32 ~ "Queens",
+    CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+    CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+    TRUE ~ "Other"
+  )) |>
+  mutate(TREES = scales::comma(TREES),
+         AREA_SQFT = scales::comma(AREA_SQFT),
+         AREA_KM2 = scales::comma(round(AREA_KM2, 1)),
+         TREES_PER_KM2 = scales::comma(round(TREES_PER_KM2, 0))) |>
+  select(Borough, `Council District` = CounDist, 
+         `Number of Trees` = TREES, `Area in Square Feet` = AREA_SQFT,
+         `Area in Square Kilometers` = AREA_KM2, 
+         `Trees per Sqaure Kilometer` = TREES_PER_KM2) |>
+  datatable(caption = "Most Trees per District", options=list(searching=FALSE, info=FALSE))
+```
+> `{r} density_df`
+
+```{r}
+#| label: task-4.3
+#| code-fold: true
+#| code-summary: "Task-4.3"
+#| echo: true
+#| eval: true
+#| message: false
+#| warning: false
+#| results: "hide"
+
+# 3
+
+top_dead_df <- trees_with_dist |>
+  st_drop_geometry() |>
+  mutate(cond = tolower(trimws(tpcondition))) |>
+  filter(!is.na(cond), cond != "") |>
+  group_by(CounDist) %>%
+  summarise(
+    dead_trees   = sum(cond == "dead"),
+    total_known  = n(),
+    frac_dead    = dead_trees / total_known,
+    .groups = "drop"
+  ) |>
+  arrange(desc(frac_dead)) |>
+  mutate(dead_trees = scales::comma(dead_trees),
+         total_known = scales::comma(total_known),
+         frac_dead = round(frac_dead, 3)) |>
+  mutate(Borough = case_when(
+    CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+    CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+    CounDist >= 19 & CounDist <= 32 ~ "Queens",
+    CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+    CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+    TRUE ~ "Other"
+  )) |>
+  select(Borough, `Council District` = CounDist, 
+         `Dead Trees` = dead_trees, `Total Trees` = total_known,
+         `Fraction Dead` = frac_dead) |>
+  datatable(caption = "Highest Fration of Dead Trees (of trees with known condition)", options=list(searching=FALSE, info=FALSE))
+```
+> `{r} top_dead_df`
+
+```{r}
+#| label: task-4.4
+#| code-fold: true
+#| code-summary: "Task-4.4"
+#| echo: true
+#| eval: true
+#| message: false
+#| warning: false
+#| results: "hide"
+
+## 4
+
+
+
+df4 <- trees_with_dist |>
+  st_drop_geometry() |>
+  mutate(
+    Borough = case_when(
+      CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+      CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+      CounDist >= 19 & CounDist <= 32 ~ "Queens",
+      CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+      CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+      TRUE ~ "Other"
+    ),
+    species = tolower(trimws(genusspecies))
+  ) |>
+  filter(Borough == "Manhattan", !is.na(species), species != "") |>
+  count(species, sort = TRUE) |>
+slice_head( n = 5) |>
+  mutate(n = scales::comma(n)) |>
+  select(`Species` = species, 
+         `Count` = n) |>
+  datatable(caption = "Most common tree species in Manhattan", options=list(searching=FALSE, info=FALSE))
+```
+> `{r} df4`
+
+```{r}
+#| label: task-4.5
+#| code-fold: true
+#| code-summary: "Task-4.5"
+#| echo: true
+#| eval: true
+#| message: false
+#| warning: false
+#| results: "hide"
+# 5
+
+library(sf)
+library(dplyr)
+
+
+new_st_point <- function(lat, lon, ...) {
+  st_sfc(st_point(c(lon, lat))) |>
+    st_set_crs("WGS84")
+}
+
+# Baruch College point
+my_point <- new_st_point(lat = 40.7404, lon = -73.9832)
+
+trees_near_baruch <- trees_with_dist |>
+  st_transform(4326) |>
+  mutate(
+    Borough = case_when(
+      CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+      CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+      CounDist >= 19 & CounDist <= 32 ~ "Queens",
+      CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+      CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+      TRUE ~ "Other"
+    ),
+    distance = round(as.numeric(st_distance(geometry, my_point)), 2)  # <-- round to 2
+  ) |>
+  filter(Borough == "Manhattan") |>
+  arrange(distance) |>
+  st_drop_geometry() |>
+  select(
+    `Species` = genusspecies,
+    Borough,
+    `Council District` = CounDist,
+    `Distance (meters)` = distance,
+    `Tree Condition` = tpcondition
+  ) |>
+  head(5) |>
+  datatable(
+    caption  = "Closest Trees to Baruch College",
+    rownames = FALSE,
+    options  = list(searching = FALSE, info = FALSE)
+  )
+```
+> `{r} trees_near_baruch`
+
+
+```{r}
+#| label: memo
+#| code-fold: true
+#| code-summary: memo
+#| echo: true
+#| eval: true
+#| message: false
+#| warning: false
+#| results: "hide"
+library(dplyr)
+library(DT)
+
+borough_dead <- trees_with_dist |>
+  st_drop_geometry() |>
+  mutate(
+    cond    = tolower(trimws(tpcondition)),
+    Borough = case_when(
+      CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+      CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+      CounDist >= 19 & CounDist <= 32 ~ "Queens",
+      CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+      CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+      TRUE ~ "Other"
+    )
+  ) |>
+  filter(!is.na(cond), cond != "", Borough %in% c("Manhattan","Bronx","Queens","Brooklyn","Staten Island")) |>
+  group_by(Borough) |>
+  summarise(
+    dead_trees  = sum(cond == "dead"),
+    total_known = n(),
+    frac_dead   = dead_trees / total_known,
+    .groups = "drop"
+  ) |>
+  arrange(desc(frac_dead))
+
+borough_dead_df <- datatable(
+  borough_dead |>
+    mutate(
+      `Dead Trees`   = scales::comma(dead_trees),
+      `Known Trees`  = scales::comma(total_known),
+      `Fraction Dead`= scales::percent(frac_dead, accuracy = 0.1)
+    ) |>
+    select(Borough, `Dead Trees`, `Known Trees`, `Fraction Dead`),
+  caption  = "Dead-tree fraction by borough",
+  rownames = FALSE,
+  options  = list(searching = FALSE, info = FALSE)
+)
+
+
+TOP_BOROUGH <- borough_dead |> slice(1) |> pull(Borough)
+
+district_dead_top_boro <- trees_with_dist |>
+  st_drop_geometry() |>
+  mutate(
+    cond    = tolower(trimws(tpcondition)),
+    Borough = case_when(
+      CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+      CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+      CounDist >= 19 & CounDist <= 32 ~ "Queens",
+      CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+      CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+      TRUE ~ "Other"
+    )
+  ) |>
+  filter(Borough == TOP_BOROUGH, !is.na(cond), cond != "") |>
+  group_by(CounDist) |>
+  summarise(
+
+    dead_trees  = sum(cond == "dead"),
+    total_known = n(),
+    frac_dead   = dead_trees / total_known,
+    .groups = "drop"
+  ) |>
+  arrange(desc(frac_dead))
+
+district_dead_top_boro_df <- datatable(
+  district_dead_top_boro |>
+    mutate(
+      `Dead Trees`   = scales::comma(dead_trees),
+      `Known Trees`  = scales::comma(total_known),
+      `Fraction Dead`= scales::percent(frac_dead, accuracy = 0.1)
+    ) |>
+    select(`Council District` = CounDist, `Dead Trees`, `Known Trees`, `Fraction Dead`),
+  caption  = paste("Dead-tree fraction by district in", TOP_BOROUGH),
+  rownames = FALSE,
+  options  = list(searching = FALSE, info = FALSE)
+)
+
+
+if(!require("patchwork")) install.packages("patchwork")
+library(sf)
+library(ggplot2)
+library(patchwork)
+library(sf)
+library(dplyr)
+library(leaflet)
+library(crosstalk)
+
+# 1) Pick the borough with the highest dead-tree fraction, then its top/bottom districts
+borough_dead <- trees_with_dist |>
+  st_drop_geometry() |>
+  mutate(
+    cond    = tolower(trimws(tpcondition)),
+    Borough = case_when(
+      CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+      CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+      CounDist >= 19 & CounDist <= 32 ~ "Queens",
+      CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+      CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+      TRUE ~ "Other"
+    )
+  ) |>
+  filter(Borough %in% c("Manhattan","Bronx","Queens","Brooklyn","Staten Island"),
+         !is.na(cond), cond != "") |>
+  group_by(Borough) |>
+  summarise(
+    dead_trees  = sum(cond == "dead"),
+    total_known = n(),
+    frac_dead   = dead_trees / total_known,
+    .groups = "drop"
+  ) |>
+  arrange(desc(frac_dead))
+
+TOP_BOROUGH <- borough_dead |> slice(1) |> pull(Borough)
+
+district_dead_top_boro <- trees_with_dist |>
+  st_drop_geometry() |>
+  mutate(
+    cond    = tolower(trimws(tpcondition)),
+    Borough = case_when(
+      CounDist >= 1  & CounDist <= 10 ~ "Manhattan",
+      CounDist >= 11 & CounDist <= 18 ~ "Bronx",
+      CounDist >= 19 & CounDist <= 32 ~ "Queens",
+      CounDist >= 33 & CounDist <= 48 ~ "Brooklyn",
+      CounDist >= 49 & CounDist <= 51 ~ "Staten Island",
+      TRUE ~ "Other"
+    )
+  ) |>
+  filter(Borough == TOP_BOROUGH, !is.na(cond), cond != "") |>
+  group_by(CounDist) |>
+  summarise(
+    dead_trees  = sum(cond == "dead"),
+    total_known = n(),
+    frac_dead   = dead_trees / total_known,
+    .groups = "drop"
+  ) |>
+  arrange(desc(frac_dead))
+
+TOP_DIST <- district_dead_top_boro |> slice(1)   |> pull(CounDist)
+BOT_DIST <- district_dead_top_boro |> slice(n()) |> pull(CounDist)
+
+# 2) Prep data for mapping (WGS84, filter to the two districts)
+DISTRICTS_4326 <- st_transform(districts, 4326)
+TREES_4326     <- st_transform(trees_with_dist, 4326) |>
+  mutate(cond = tolower(trimws(tpcondition))) |>
+  filter(cond %in% c("fair","good","dead","excellent","poor"))
+
+poly_top <- DISTRICTS_4326 |> filter(CounDist == TOP_DIST)
+poly_bot <- DISTRICTS_4326 |> filter(CounDist == BOT_DIST)
+
+pts_top  <- TREES_4326 |> filter(CounDist == TOP_DIST)
+pts_bot  <- TREES_4326 |> filter(CounDist == BOT_DIST)
+
+# 3) Discrete condition palette (exact colors you asked for)
+COND_LEVELS <- c("dead","excellent","poor","fair","good")
+PAL_VEC     <- c(dead = "#DC2626",   # red
+                 excellent = "#15803D", # green (darker)
+                 poor = "#F97316",   # orange
+                 fair = "#FACC15",   # yellow
+                 good = "#86EFAC")   # lighter green
+pal <- colorFactor(palette = PAL_VEC[COND_LEVELS], domain = COND_LEVELS)
+
+# 4) Build the two maps
+m_top <- leaflet(options = leafletOptions(minZoom = 9)) |>
+  addProviderTiles(providers$CartoDB.Positron) |>
+  addPolygons(data = poly_top,
+              color = "#334155", weight = 1.3, fill = FALSE) |>
+  addCircleMarkers(data = pts_top,
+                   radius = 2, stroke = FALSE, fillOpacity = 0.6,
+                   color = ~pal(cond),
+                   popup = ~paste0("<b>Condition:</b> ", tpcondition,
+                                   "<br><b>Species:</b> ", genusspecies)) |>
+  addLegend("bottomleft", pal = pal, values = COND_LEVELS,
+            title = paste0("Tree Condition\n(Top: D.", TOP_DIST, " — ", TOP_BOROUGH, ")"),
+            opacity = 1) |>
+  fitBounds(lng1 = st_bbox(poly_top)[["xmin"]], lat1 = st_bbox(poly_top)[["ymin"]],
+            lng2 = st_bbox(poly_top)[["xmax"]], lat2 = st_bbox(poly_top)[["ymax"]])
+
+m_bot <- leaflet(options = leafletOptions(minZoom = 9)) |>
+  addProviderTiles(providers$CartoDB.Positron) |>
+  addPolygons(data = poly_bot,
+              color = "#334155", weight = 1.3, fill = FALSE) |>
+  addCircleMarkers(data = pts_bot,
+                   radius = 2, stroke = FALSE, fillOpacity = 0.6,
+                   color = ~pal(cond),
+                   popup = ~paste0("<b>Condition:</b> ", tpcondition,
+                                   "<br><b>Species:</b> ", genusspecies)) |>
+  addLegend("bottomleft", pal = pal, values = COND_LEVELS,
+            title = paste0("Tree Condition\n(Lowest: D.", BOT_DIST, " — ", TOP_BOROUGH, ")"),
+            opacity = 1) |>
+  fitBounds(lng1 = st_bbox(poly_bot)[["xmin"]], lat1 = st_bbox(poly_bot)[["ymin"]],
+            lng2 = st_bbox(poly_bot)[["xmax"]], lat2 = st_bbox(poly_bot)[["ymax"]])
+
+# 5) Display side-by-side (leaflet doesn't support facet_wrap; this lays them out in two columns)
+vizmemo <- bscols(widths = c(6, 6), m_top, m_bot)
+```
+
+## Tree Initiative
+
+#### Overview
+New York City’s urban forest is extensive, but a meaningful share of street trees are no longer healthy—many are **dead** and no longer providing shade, stormwater capture, or public-safety benefits. Dead trees also increase maintenance risk and erode neighborhood confidence in basic services. This initiative focuses resources on targeted replacement where need is highest so we can quickly restore canopy and improve quality of life.
+
+#### Why This Initiative Is Important
+**Staten Island** has the **highest fraction of dead trees** among the five boroughs. Within Staten Island, **Council District 50** has the **highest dead-tree fraction**, while **District 51** has the **lowest** on the island. This contrast makes District 50 the clear starting point for a concentrated replacement program.
+
+
+Please refer to the visualization below to see how **District 50** compares with **District 51** on dead-tree share and overall condition mix.
+
+
+#### Proposed Scope
+- **Replace 30 dead trees per week in District 50 for one full year.**  
+  That is **30 × 52 = 1,560** trees targeted for removal and re-planting across the district.
+- Prioritize locations in school zones, bus corridors, and heat-vulnerable residential blocks to maximize equity and public-health impact.
+- Pair removals with **species-diverse** re-planting (at least 10–15 species across sites) to improve resilience to pests and climate stress.
+
+#### Implementation Plan
+- **Block scheduling:** Cluster work orders so crews can clear and re-plant within the same week, minimizing open stumps and resident disruption.  
+- **Safety first:** Address hazardous stems near schools, intersections, and high-wind corridors in the first two months.  
+- **Right tree, right place:** Match species to site constraints (tree bed size, overhead lines, soil volume) to reduce early mortality.  
+- **Community notification:** Provide 2-week advance flyers and 311 updates; coordinate with civic associations for watering volunteers.
+
+#### Metrics to Track
+- **Dead-Tree Fraction (district-level):** Share of trees with condition = “Dead”; target a **≥ 40% reduction** in District 50 within 12 months.  
+- **Replacement Throughput:** Weekly removals and re-plantings completed; maintain **≥ 30/week** pace.  
+- **One-Year Survival Rate:** Share of new plantings alive after 12 months; target **≥ 90%** via watering schedules and species mix.  
+- **Canopy Recovery Indicators:** Proxy via new-planting counts by blockface and projected crown spread categories.
+
+#### Why This Works
+Concentrating on District 50—Staten Island’s highest dead-tree fraction—delivers visible, measurable change fast. Pairing removals with immediate, species-diverse re-planting restores shade, cools streets in summer, and reduces limb-fall risk in storms. Using District 51 as a comparison benchmark strengthens accountability: if our replacement and after-care plan narrows the gap in dead-tree fraction between **Districts 50 and 51** over the year, we will have a clear, public demonstration that targeted investment can quickly stabilize—and then grow—NYC’s living infrastructure.
+
+> `{r} borough_dead_df`
+
+> `{r} district_dead_top_boro_df`
+
+> `{r} vizmemo`
+
+
+
+

@@ -1028,7 +1028,7 @@ ces_test <- ces_joined |>
 test_A <- ces_test %>%
   t_test(rev_share_level ~ period, order = c("pre_2020", "post_2020"))
 ```
-`{r} report_test_A`
+`{r} report_test_A` 
 
 > To investigate this question, a two-sample t-test is used to compare the average proportional revision size (how big a revision is relative to the total employment level that month) across two time periods: pre-2020 and post-2020. To make this comparison possible, the dataset is split into those two groups using the year of each observation, testing whether the mean value of rev_share_level differs between the groups.
 

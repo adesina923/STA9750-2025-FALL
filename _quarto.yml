@@ -29,6 +29,5 @@ format:
   html:
     theme: sandstone
     toc: false
-
 editor:
   mode: source

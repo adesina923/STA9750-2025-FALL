@@ -8,10 +8,10 @@ format:
         code-fold: true
 ---  
 
-
 # Introduction
 
 Over the last decade, the music industry has undergone a profound transformation. Physical sales and radio airplay have been largely supplanted by streaming platforms, social media, and algorithm-driven recommendation systems. Songs are no longer discovered through a single channel; popularity emerges from a complex ecosystem of streaming services, social platforms, and traditional industry institutions.
+
 
 This shift motivates the overarching question (OQ) of this project:
 

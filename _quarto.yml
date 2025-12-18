@@ -22,6 +22,8 @@ website:
         text: Mini Project 4
       - href: billboard_spotify.qmd
         text: Individual Report for Streaming Platforms
+      - href: 9750_SoundsGood_GroupReport_FINAL.qmd
+        text: Group Report for Streaming Platforms
 
 format:
   html:

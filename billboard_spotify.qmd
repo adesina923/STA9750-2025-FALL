@@ -9,14 +9,16 @@ format:
 ---
 
 
+
 ## Introduction
-Music has been said to pull at the heartstrings of the world. There are very few mediums that have the ability to connect people from different cultures, languages, and regions like music. The music industry, primarily in the United States, has changed dramatically due to the onset of streaming and the proliferation of multiple streaming platforms.
+Music has been said to pull at the heartstrings of the world. There are very few media that can connect people from different cultures, languages, and regions like music. The music industry, primarily in the United States, has changed dramatically due to the onset of streaming and the proliferation of multiple streaming platforms.
 
 **The Billboard Hot 100** has been widely regarded as one of the most important indicators of commercial success in popular music, as it captures which songs truly break through to mainstream audiences. Traditionally, chart performance reflected a combination of physical sales, radio airplay, and later, digital downloads, offering a snapshot of what the public was listening to at any given moment.
 
 The rise of streaming has fundamentally reshaped this landscape. Platforms like **Spotify** and Apple Music have not only changed how listeners access music, but have also altered how success is measured. Streams, playlists, and algorithm-driven recommendations now play a key role in determining which songs climb the charts. As a result, the Billboard Hot 100 today reflects a complex but interesting dynamic between listener behavior, platform dynamics, and the intrinsic qualities of a song.
 
 In this project, I aim to explore the latter and determine **what aspects of a song’s musical profile are most strongly associated with its Billboard charting performance**. Using Spotify song quality data that captures audio characteristics such as tempo, danceability, and energy, I analyze which features of a track are most predictive of its charting success. Ultimately, the goal is to better understand how the qualities of the music itself relate to commercial performance in the modern, streaming-dominated music industry.
+
 
 ```{r}
 #| echo: false
@@ -137,7 +139,7 @@ sp_raw_sneak_peak <- sp_raw |>
   datatable(caption = "Raw Spotify Songs Analytics Dataset - Last 5 Rows",
             options = list(searching = FALSE, info = FALSE, pageLength = 5))
 ```
-This dataset, posted by GitHub user **gabminamedez**, contains over 160K tracks from 1921-2020 found on Spotify as of June 2020. Each row corresponds to a single track, and contains basic information like the **name**, and **duration** of a track, the **artists** on it, and the **year** of release. What makes this dataset special though, are the audio features it includes, most of which have been **curated*** by Spotify's API. 
+This dataset, posted by GitHub user **gabminamedez**, contains over 160K tracks from 1921-2020 found on Spotify as of June 2020. Each row corresponds to a single track, and contains basic information like the **name**, and **duration** of a track, the **artists** on it, and the **year** of release. What makes this dataset special, though, are the audio features it includes, most of which have been **curated*** by Spotify's API. 
 
 > - **acousticness***: A confidence measure from 0.0 to 1.0 of whether the track is acoustic.
 > - **danceability***: Describes how suitable a track is for dancing. A value of 0.0 is least danceable and 1.0 is most danceable.
@@ -491,10 +493,11 @@ bb_song <- bb_keys %>%
   )
 ```
 
-In order to suitably join the two datasets together, and begin answering our core question of what audio features best impact a song's charting success, data cleaning is required. 
+In order to suitably join the two datasets together and begin answering our core question of what audio features best impact a song's charting success, data cleaning is required. 
 
 
 I opted to only look at the charts from **2015-2019**. This time period is representative of the music streaming-era boom, when the industry was transformed from physical/download sales to a subscription-based model dominated by services like **Spotify**, which **hit 100 million paid subscribers in 2019**. Looking at songs that charted in this time period ensured that I had a good sample to construct my analysis from.
+
 ```{r}
 #| eval: false
 # choose the 2015 - 2019 window for the billboard data
@@ -672,7 +675,7 @@ normalize_title <- function(x) {
 ```
 
 
-After cleaning the Spotify artist names, I split the artists across multiple rows so that each song has a row for each artist associated with it, and create the join key in that dataset for each row. Here is an example of this for the song "Bartier Cardi" by Cardi B, featuring 21 Savage.
+After cleaning the Spotify artist names, I split the artists across multiple rows so that each song has a row for each artist associated with it, and created the join key in that dataset for each row. Here is an example of this for the song "Bartier Cardi" by Cardi B, featuring 21 Savage.
 ```{r}
 #| eval: false
 ################# Spotify manipulation (1 row per song per artist)
@@ -768,7 +771,7 @@ bb_keys_example <- bb_keys |>
 > `{r} bb_keys_example`
 
 
-I collapsed Billboard’s weekly charts to one row per cleaned title + primary artist within the 2015–2019 window so that each song contributes a single, interpretable popularity target aligned with Spotify’s track-level features. For each song–artist pair I computed: 
+I collapsed Billboard’s weekly charts to one row per cleaned title + primary artist within the 2015–2019 window so that each song contributes a single, interpretable popularity target aligned with Spotify’s track-level features. For each song–artist pair, I computed: 
 ```{r}
 #| eval: false
 bb_song <- bb_keys %>%
@@ -911,7 +914,7 @@ songs_join <- bb_song %>%
     hit_top40 = as.integer(peak_position_window <= 40) # did the song reach the top 40?
   )
 ```
-The final dataset from which I conducted my analysis consists of the song names and primary artist, the song's Billboard outcomes (including flags indicating if a song reached the top 10 or top 40), Spotify audio features, and a few computed convenience fields, the most important of such being **chart_score**. This is a reverse-rank of each song’s best Hot-100 position within the 2015-2019 window, expressing Billboard peak rank on a “higher = more popular” scale. It maps a #1 peak to 100, a #10 to 91, a #50 to 51, and #100 to 1, so a 10-point difference corresponds to roughly 10 chart places. Using **chart_score** makes directionality intuitive in my analysis, as positive effects imply greater popularity. 
+The final dataset from which I conducted my analysis consists of the song names and primary artist, the song's Billboard outcomes (including flags indicating if a song reached the top 10 or top 40), Spotify audio features, and a few computed convenience fields, the most important of which is **chart_score**. This is a reverse-rank of each song’s best Hot-100 position within the 2015-2019 window, expressing Billboard peak rank on a “higher = more popular” scale. It maps a #1 peak to 100, a #10 to 91, a #50 to 51, and #100 to 1, so a 10-point difference corresponds to roughly 10 chart places. Using **chart_score** makes directionality intuitive in my analysis, as positive effects imply greater popularity. 
 ```{r}
 #| eval: false
 ########## FINAL DATASET ##############
@@ -1334,7 +1337,7 @@ hits_in_2018 <- songs_final |>
 viz1
 ```
 
-> When analyzing the percentage of songs that reached the top 10 and top 40 on a yearly basis, and comparing that with Spotify's popularity metric, it is clear to see that while **"popularity" has steadily increased over time** for songs on Spotify, the same cannot be said of **Billboard charting success**, which is much **more variable**. **2018** seems to be the **year of release** where songs did better commercially than other years. The year includes mega-hits like "Rockstar" by Post Malone, "God's Plan" by Drake, and **"Sicko Mode" by Travis Scott**, which was the **most popular song that year on Spotify**. 
+> When analyzing the percentage of songs that reached the top 10 and top 40 yearly, and comparing that with Spotify's popularity metric, it is clear to see that while **"popularity" has steadily increased over time** for songs on Spotify, the same cannot be said of **Billboard charting success**, which is much **more variable**. **2018** seems to be the **year of release** where songs did better commercially than in other years. The year includes mega-hits like "Rockstar" by Post Malone, "God's Plan" by Drake, and **"Sicko Mode" by Travis Scott**, which was the **most popular song that year on Spotify**. 
 
 > `{r} hits_in_2018` 
 
@@ -1443,9 +1446,9 @@ viz3 <- ggplot(plot_df, aes(x = value, y = weeks_on_chart)) +
 viz3
 ```
 
-> Plotting the relationships between same numeric audio features and the staying power of a song on the charts shows that certain features are more associated with a song staying on the charts for a longer time. In general, **higher energy, louder songs** have more staying power on Billboard's Hot 100. The same can be said for songs with more **positive content (valence)**, and songs that are **more danceable**. There is a clear sweet spot for the duration of a song that is most conducive to increased staying power, and most songs are clustered around that 3-4 minute range anyway.
+> Plotting the relationships between some numeric audio features and the staying power of a song on the charts shows that certain features are more associated with a song staying on the charts for a longer time. In general, **higher energy, louder songs** have more staying power on Billboard's Hot 100. The same can be said for songs with more **positive content (valence)**, and songs that are **more danceable**. There is a clear sweet spot for the duration of a song that is most conducive to increased staying power, and most songs are clustered around that 3-4 minute range anyway.
 
-## What Aspects of a Song's Quality Best Impacts its Billboard Charting Success?
+## What Aspects of a Song's Quality Best Impact Its Billboard Charting Success?
 ```{r}
 #| echo: false
 #| message: false
@@ -1563,7 +1566,7 @@ p_imp <- ggplot(coefs, aes(x = reorder(term, importance), y = importance, fill =
   theme(legend.position = "top")
 ```
 
-At this point, I seek to answer my main question of analysis. **What Aspects of a Song's Quality Best Impacts its Billboard Charting Success?**
+At this point, I seek to answer my main question of analysis. **What Aspects of a Song's Quality Best Impact Its Billboard Charting Success?**
 
 ### Correlation Heatmap
 ```{r}
@@ -1651,7 +1654,7 @@ p_corr <- ggplot(cor_long, aes(x = col_lab, y = row_lab, fill = r)) +
 #| warning: false
 p_corr
 ```
-> **Danceability, Duration, and Loudness** are the audio features most **positively correlated with chart_score**, with correlations of 0.07, 0.04 and 0.04, respectively. However, it is important to note how **small** these correlations are. On the negative side, a simple correlation shows that **acousticness, instrumentalness**, and a song being **explicit**, **negatively impact Billboard chart success**.
+> **Danceability, Duration, and Loudness** are the audio features most **positively correlated with chart_score**, with correlations of 0.07, 0.04, and 0.04, respectively. However, it is important to note how **small** these correlations are. On the negative side, a simple correlation shows that **acousticness, instrumentalness**, and a song being **explicit**, **negatively impact Billboard chart success**.
 
 ### Linear Model
 ```{r}
